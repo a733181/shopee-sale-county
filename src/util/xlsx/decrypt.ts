@@ -11,12 +11,12 @@ function toU8(c: unknown): Uint8Array {
   return new Uint8Array((c as ArrayBuffer))
 }
 
-function concat(...parts: ArrayBufferLike[]): ArrayBuffer {
+function concat(...parts: Uint8Array[]): ArrayBuffer {
   const len = parts.reduce((s, p) => s + p.byteLength, 0)
   const out = new Uint8Array(len)
   let off = 0
-  for (const p of parts) { out.set(new Uint8Array(p), off); off += p.byteLength }
-  return out.buffer
+  for (const p of parts) { out.set(p, off); off += p.byteLength }
+  return out.buffer as ArrayBuffer
 }
 
 function le32(n: number): Uint8Array {
@@ -49,7 +49,7 @@ async function makeKey(password: string, salt: Uint8Array, keyBytes: number): Pr
 
   const buf1 = new Uint8Array(64).fill(0x36)
   for (let j = 0; j < 20; j++) buf1[j] ^= hfinal[j]
-  const x1 = await H(buf1)
+  const x1 = await H(buf1.buffer as ArrayBuffer)
   return x1.subarray(0, keyBytes)
 }
 
@@ -59,22 +59,6 @@ function ecbDecrypt(key: Uint8Array, data: Uint8Array): Uint8Array {
   const cipher = new aesjs.ModeOfOperation.ecb(key)
   // aes-js requires multiple of 16
   return new Uint8Array(cipher.decrypt(data))
-}
-
-// ── verify password via EncryptionVerifier ────────────────────────────────────
-
-function verifyPassword(
-  key: Uint8Array,
-  encVerifier: Uint8Array,
-  encVerHashPadded: Uint8Array,
-  hashSize: number,
-): boolean {
-  // Decrypt verifier (16 bytes) and hash (32 bytes padded) with AES-ECB
-  const ver  = ecbDecrypt(key, encVerifier)
-  const hash = ecbDecrypt(key, encVerHashPadded).subarray(0, hashSize)
-  // SHA-1(decryptedVerifier) should equal decryptedHash
-  // Use sync comparison since we can't easily await here
-  return ver.length > 0 && hash.length > 0  // actual check done inside decryptXlsx
 }
 
 // ── main export ───────────────────────────────────────────────────────────────
@@ -114,7 +98,7 @@ export async function decryptXlsx(buffer: ArrayBuffer, password: string): Promis
   // Verify password
   const decVer  = ecbDecrypt(key, encVerifier)
   const decHash = ecbDecrypt(key, encVerHashPad).subarray(0, hashSize)
-  const expectedHash = new Uint8Array(await crypto.subtle.digest('SHA-1', decVer))
+  const expectedHash = new Uint8Array(await crypto.subtle.digest('SHA-1', decVer.buffer as ArrayBuffer))
   if (!expectedHash.every((b, i) => b === decHash[i]))
     throw new Error('Wrong password')
 
@@ -123,5 +107,5 @@ export async function decryptXlsx(buffer: ArrayBuffer, password: string): Promis
   const encData   = pkg.slice(8)
   const plain     = ecbDecrypt(key, encData).subarray(0, totalSize)
 
-  return plain.buffer.slice(plain.byteOffset, plain.byteOffset + plain.byteLength)
+  return plain.buffer.slice(plain.byteOffset, plain.byteOffset + plain.byteLength) as ArrayBuffer
 }
