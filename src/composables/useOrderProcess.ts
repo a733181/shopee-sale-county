@@ -13,7 +13,7 @@ export interface FilterDef {
 }
 
 export const ACTIVE_FILTERS: FilterDef[] = [
-  { label: '訂單狀態：已完成', fn: (row) => String(row['訂單狀態']) === '已完成' },
+  { label: '排除訂單不成立', fn: (row) => !String(row['訂單狀態']).includes('不成立') },
 ]
 
 function applyFilters(rows: RawRow[]): RawRow[] {
