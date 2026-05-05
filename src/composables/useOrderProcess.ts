@@ -2,25 +2,42 @@ import XLSX from '@/util/xlsx/xlsx-0.19.3.mjs'
 import { decryptXlsxInWorker } from '@/util/xlsx/useDecrypt'
 import type { StatRow } from '@/types/order'
 
-type RawRow = Record<string, string | number>
+export type RawRow = Record<string, string | number>
 
-// ── Filters ──────────────────────────────────────────────────────────────────
-// Add entries here to extend filter logic; all filters are ANDed together.
+// ── Parse ─────────────────────────────────────────────────────────────────────
 
-export interface FilterDef {
-  label: string
-  fn: (row: RawRow) => boolean
+export async function parseFile(
+  file: File,
+  password: string,
+): Promise<{ rows: RawRow[]; statuses: string[] }> {
+  const buffer = await file.arrayBuffer()
+
+  let xlsxBuffer: ArrayBuffer
+  try {
+    xlsxBuffer = password ? await decryptXlsxInWorker(buffer, password) : buffer
+  } catch (e) {
+    const msg = (e as Error).message
+    throw new Error(msg === 'Wrong password' ? '密碼錯誤，請確認後再試' : msg)
+  }
+
+  const wb = XLSX.read(new Uint8Array(xlsxBuffer), { type: 'array' })
+  const ws = wb.Sheets[wb.SheetNames[0]]
+  const rows: RawRow[] = XLSX.utils.sheet_to_json(ws, { defval: '' })
+
+  const statuses = [...new Set(rows.map(r => String(r['訂單狀態'] ?? '')))]
+    .filter(Boolean)
+    .sort()
+
+  return { rows, statuses }
 }
 
-export const ACTIVE_FILTERS: FilterDef[] = [
-  { label: '排除訂單不成立', fn: (row) => !String(row['訂單狀態']).includes('不成立') },
-]
+// ── Process ───────────────────────────────────────────────────────────────────
 
-function applyFilters(rows: RawRow[]): RawRow[] {
-  return rows.filter(row => ACTIVE_FILTERS.every(f => f.fn(row)))
+export function processRows(rows: RawRow[], includedStatuses: string[]): StatRow[] {
+  const set = new Set(includedStatuses)
+  const filtered = rows.filter(r => set.has(String(r['訂單狀態'] ?? '')))
+  return aggregateStats(filtered)
 }
-
-// ── Aggregation ───────────────────────────────────────────────────────────────
 
 function aggregateStats(rows: RawRow[]): StatRow[] {
   const map = new Map<string, number>()
@@ -36,28 +53,7 @@ function aggregateStats(rows: RawRow[]): StatRow[] {
     .sort((a, b) => b.數量 - a.數量)
 }
 
-// ── Main process ──────────────────────────────────────────────────────────────
-
-export async function processFile(file: File, password: string): Promise<StatRow[]> {
-  const buffer = await file.arrayBuffer()
-
-  let xlsxBuffer: ArrayBuffer
-  try {
-    xlsxBuffer = password ? await decryptXlsxInWorker(buffer, password) : buffer
-  } catch (e) {
-    const msg = (e as Error).message
-    throw new Error(msg === 'Wrong password' ? '密碼錯誤，請確認後再試' : msg)
-  }
-
-  const wb = XLSX.read(new Uint8Array(xlsxBuffer), { type: 'array' })
-  const ws = wb.Sheets[wb.SheetNames[0]]
-  const rows: RawRow[] = XLSX.utils.sheet_to_json(ws, { defval: '' })
-
-  return aggregateStats(applyFilters(rows))
-}
-
 // ── Export ────────────────────────────────────────────────────────────────────
-// Add export functions here to extend export options.
 
 function escCsv(v: string | number): string {
   const s = String(v)
