@@ -22,6 +22,7 @@ export async function parseFile(
 
   const wb = XLSX.read(new Uint8Array(xlsxBuffer), { type: 'array' })
   const ws = wb.Sheets[wb.SheetNames[0]]
+  // defval:'' 確保缺格回傳空字串而非 undefined，避免後續 String() 產生 "undefined"
   const rows: RawRow[] = XLSX.utils.sheet_to_json(ws, { defval: '' })
 
   const statuses = [...new Set(rows.map(r => String(r['訂單狀態'] ?? '')))]
@@ -42,6 +43,7 @@ export function processRows(rows: RawRow[], includedStatuses: string[]): StatRow
 function aggregateStats(rows: RawRow[]): StatRow[] {
   const map = new Map<string, number>()
   for (const row of rows) {
+    // \x00 作複合 key 分隔符：null byte 不會出現在儲存格值中，故不會誤拆
     const key = `${row['商品名稱']}\x00${row['商品選項名稱'] ?? ''}`
     map.set(key, (map.get(key) ?? 0) + (Number(row['數量']) || 0))
   }
@@ -63,6 +65,7 @@ function escCsv(v: string | number): string {
 export function exportCsv(stats: StatRow[]): void {
   const cols: (keyof StatRow)[] = ['商品名稱', '商品選項名稱', '數量']
   const lines = [cols.join(','), ...stats.map(r => cols.map(c => escCsv(r[c])).join(','))]
+  // UTF-8 BOM (U+FEFF)：讓 Excel 雙擊開啟時自動識別編碼，避免中文亂碼
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = Object.assign(document.createElement('a'), { href: url, download: 'shopee-stats.csv' })
